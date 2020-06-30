@@ -24,10 +24,6 @@ module Koudoku
   mattr_accessor :free_trial_length
   @@free_trial_length = nil
 
-  mattr_accessor :prorate
-  @@prorate = true
-
-
   @@layout = nil
 
   def self.layout

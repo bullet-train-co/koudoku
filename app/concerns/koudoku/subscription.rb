@@ -34,7 +34,15 @@ module Koudoku::Subscription
             prepare_for_upgrade if upgrading?
 
             # update the package level with stripe.
-            customer.update_subscription(:plan => self.plan.stripe_id, :prorate => Koudoku.prorate)
+            if self.stripe_subscription_id
+              Stripe::Subscription.update(self.stripe_subscription_id, {
+                plan: self.plan.stripe_id,
+                quantity: team.subscription_quantity,
+              })
+            else
+              subscription = create_subscription(customer)
+              self.stripe_subscription_id = subscription.id
+            end
 
             finalize_downgrade! if downgrading?
             finalize_upgrade! if upgrading?
@@ -48,7 +56,9 @@ module Koudoku::Subscription
             self.current_price = nil
 
             # delete the subscription.
-            customer.cancel_subscription
+            subscription = Stripe::Subscription.retrieve(self.stripe_subscription_id)
+            subscription.delete
+            self.stripe_subscription_id = nil
 
             finalize_cancelation!
 
@@ -96,25 +106,8 @@ module Koudoku::Subscription
 
               finalize_new_customer!(customer.id, plan.price)
 
-              subscription_attributes = {
-                customer: customer.id,
-                items:[
-                  {
-                    plan: self.plan.stripe_id,
-                    quantity: subscription_owner_quantity
-                  }
-                ],
-                trial_from_plan: true
-              }
-
-              # If the class we're being included in supports Link Mink ..
-              if respond_to? :link_mink_id
-                if link_mink_id.present?
-                  subscription_attributes[:metadata] = {identifier: link_mink_id}
-                end
-              end
-
-              Stripe::Subscription.create(subscription_attributes)
+              subscription = create_subscription(customer)
+              self.stripe_subscription_id = subscription.id
 
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
@@ -282,6 +275,28 @@ module Koudoku::Subscription
   end
 
   def charge_disputed
+  end
+
+  def create_subscription(customer)
+    subscription_attributes = {
+      customer: customer.id,
+      items:[
+        {
+          plan: plan.stripe_id,
+          quantity: subscription_owner_quantity,
+        }
+      ],
+      trial_from_plan: true,
+    }
+
+    # If the class we're being included in supports Link Mink ..
+    if respond_to? :link_mink_id
+      if link_mink_id.present?
+        subscription_attributes[:metadata] = {identifier: link_mink_id}
+      end
+    end
+
+    Stripe::Subscription.create(subscription_attributes)
   end
 
 end

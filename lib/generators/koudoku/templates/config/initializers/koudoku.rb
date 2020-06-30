@@ -3,8 +3,7 @@ Koudoku.setup do |config|
   config.stripe_publishable_key = ENV['STRIPE_PUBLISHABLE_KEY']
   config.stripe_secret_key = ENV['STRIPE_SECRET_KEY']
 
-  Stripe.api_version = '2017-08-15' # Making sure the API version used is compatible.
-  # config.prorate = false # Default is true, set to false to disable prorating subscriptions
+  Stripe.api_version = '2020-03-02' # Making sure the API version used is compatible.
   # config.free_trial_length = 30
 
   # Specify layout you want to use for the subscription pages, default is application
