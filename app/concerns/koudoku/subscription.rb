@@ -9,6 +9,9 @@ module Koudoku::Subscription
 
     belongs_to :plan, optional: true
 
+    # only fetch invoices if the subscription actually changes.
+    after_commit :fetch_invoices
+
     # update details.
     before_save :processing!
     def processing!
@@ -35,14 +38,18 @@ module Koudoku::Subscription
 
             # update the package level with stripe.
             if self.stripe_subscription_id
-              Stripe::Subscription.update(self.stripe_subscription_id, {
+              subscription = Stripe::Subscription.update(self.stripe_subscription_id, {
                 plan: self.plan.stripe_id,
                 quantity: team.subscription_quantity,
+                expand: ['latest_invoice.payment_intent'],
               })
             else
               subscription = create_subscription(customer)
               self.stripe_subscription_id = subscription.id
             end
+
+            self.stripe_status = subscription.status
+            self.stripe_last_payment_status = subscription.latest_invoice.payment_intent.status
 
             finalize_downgrade! if downgrading?
             finalize_upgrade! if upgrading?
@@ -108,6 +115,8 @@ module Koudoku::Subscription
 
               subscription = create_subscription(customer)
               self.stripe_subscription_id = subscription.id
+              self.stripe_status = subscription.status
+              self.stripe_last_payment_status = subscription.latest_invoice.payment_intent.status
 
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
@@ -287,6 +296,7 @@ module Koudoku::Subscription
         }
       ],
       trial_from_plan: true,
+      expand: ['latest_invoice.payment_intent'],
     }
 
     # If the class we're being included in supports Link Mink ..
@@ -296,7 +306,63 @@ module Koudoku::Subscription
       end
     end
 
-    Stripe::Subscription.create(subscription_attributes)
+    subscription = Stripe::Subscription.create(subscription_attributes)
   end
 
+  def incomplete?
+    stripe_status == 'incomplete'
+  end
+
+  def needs_approval?
+    return false unless incomplete?
+    stripe_last_payment_status == 'requires_action'
+  end
+
+  def stripe_subscription
+    Stripe::Subscription.retrieve(id: stripe_subscription_id, expand: ['latest_invoice.payment_intent'])
+  end
+
+  def stripe_customer_default_source
+    customer = stripe_customer
+    customer.sources.select { |source| source.id == customer.default_source }.first
+  end
+
+  def fetch_from_stripe
+    card = stripe_customer_default_source
+    subscription = stripe_subscription
+
+    # TODO hopefully soon we'll also be able to handle `plan_id` and `current_price` updates here as well!
+    # we're using `update_column` so it doesn't trigger any koudoku callbacks.
+    update_column(:last_four, card.last4)
+    update_column(:card_type, card.brand)
+    update_column(:stripe_status, subscription.status)
+    update_column(:stripe_last_payment_status, subscription.latest_invoice.payment_intent.status)
+  end
+
+  def fetch_invoices
+    Stripe::Invoice.list(customer: stripe_id, expand: ['data.payment_intent']).each do |stripe_invoice|
+      data = stripe_invoice.to_hash
+
+      invoice = invoices.find_or_create_by(stripe_id: stripe_invoice.id) do |invoice|
+        invoice.stripe_data = data
+        invoice.stripe_created_at = Time.at(data[:created]).to_datetime
+      end
+
+      # yes, we need to do this again for invoices being updated.
+      invoice.update(stripe_data: data)
+    end
+  end
+
+  def most_recent_unpaid_invoice
+    invoices.order(:id).select(&:unpaid?).last
+  end
+
+  def has_open_invoices?
+    invoices.select(&:open?).any?
+  end
+
+  def pay_invoices
+    fetch_invoices
+    invoices.select(&:open?).map(&:pay)
+  end
 end

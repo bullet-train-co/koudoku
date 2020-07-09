@@ -2,7 +2,7 @@ module Koudoku
   class SubscriptionsController < ApplicationController
     before_action :load_owner
     before_action :show_existing_subscription, only: [:index, :new, :create], unless: :no_owner?
-    before_action :load_subscription, only: [:show, :cancel, :edit, :update]
+    before_action :load_subscription, only: [:show, :cancel, :edit, :update, :authenticate, :reattempt]
     before_action :load_plans, only: [:index, :edit]
 
     def load_plans
@@ -161,15 +161,54 @@ module Koudoku
     def update
       begin
         if @subscription.update_attributes(subscription_params)
-          flash[:notice] = I18n.t('koudoku.confirmations.subscription_updated')
-          redirect_to owner_subscription_path(@owner, @subscription)
+          @subscription.pay_invoices
+          if @subscription.has_open_invoices?
+            unpaid_invoice = @subscription.most_recent_unpaid_invoice
+            if unpaid_invoice.authentication_required?
+              redirect_to authenticate_owner_subscription_path(@owner, @subscription, invoice_id: unpaid_invoice.id)
+            else
+              flash[:error] = I18n.t('koudoku.failure.needs_updated_card')
+              redirect_to edit_owner_subscription_path(@owner, @subscription, update: 'card')
+            end
+          else
+            flash[:notice] = I18n.t('koudoku.confirmations.subscription_updated')
+            return redirect_to owner_subscription_path(@owner, @subscription)
+          end
         else
           flash[:error] = I18n.t('koudoku.failure.problem_processing_transaction')
           render :edit
         end
-      rescue Exception => e
-        flash[:error] = I18n.t('koudoku.failure.plan_change_needs_updated_card', :error => e.message)
+      rescue Stripe::CardError => error
+        # TODO i don't think this code actually does anything anymore, because stripe still creates a subscription when
+        # the payment method fails, it just leaves the invoice in an open state. for that reason, we're now handling
+        # the failed payment above.
+        flash[:error] = I18n.t('koudoku.failure.plan_change_needs_updated_card', :error => error.message)
         redirect_to edit_owner_subscription_path(@owner, @subscription, update: 'card')
+      end
+    end
+
+    def load_invoice
+      @invoice = @subscription.invoices.find(params[:invoice_id])
+    end
+
+    def authenticate
+      load_invoice
+      redirect_to @invoice.stripe_authentication_url
+    end
+
+    def reattempt
+      load_invoice
+      begin
+        @invoice.stripe_invoice.pay
+        redirect_to redirect_to owner_subscription_path(@owner, @subscription)
+      rescue Stripe::CardError => error
+        @invoice.fetch_from_stripe
+        if @invoice.authentication_required?
+          redirect_to authenticate_owner_subscription_path(@owner, @subscription, invoice_id: @invoice.id)
+        else
+          flash[:error] = I18n.t('koudoku.failure.charge_reattempt_needs_updated_card', :error => error.message)
+          redirect_to edit_owner_subscription_path(@owner, @subscription, update: 'card')
+        end
       end
     end
 

@@ -11,6 +11,8 @@ en:
     failure:
       problem_processing_transaction: "There was a problem processing this transaction."
       plan_change_needs_updated_card: "Our payment provider returned the following message: \"%{error}\" Please update your payment information before trying to change plans."
+      charge_reattempt_needs_updated_card: "Our payment provider returned the following message: \"%{error}\" Please update your payment information and reattempt this payment."
+      needs_updated_card: "Our payment provider wasn't able to process the required payment with the card we have on file. Please update your payment information and reattempt this payment."
       unauthorized: "Unauthorized"
     plan_intervals:
       month: "month"

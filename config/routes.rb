@@ -5,10 +5,12 @@ Koudoku::Engine.routes.draw do
     resources :subscriptions do
       member do
         post :cancel
+        get :authenticate
+        get :reattempt
       end
     end
   end
-    
+
   mount StripeEvent::Engine => '/webhooks'
-  
+
 end
