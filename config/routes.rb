@@ -7,6 +7,7 @@ Koudoku::Engine.routes.draw do
         post :cancel
         get :authenticate
         get :reattempt
+        get :failed
       end
     end
   end

@@ -49,7 +49,7 @@ module Koudoku::Subscription
             end
 
             self.stripe_status = subscription.status
-            self.stripe_last_payment_status = subscription.latest_invoice.payment_intent.status
+            self.stripe_last_payment_status = subscription.latest_invoice.payment_intent&.status
 
             finalize_downgrade! if downgrading?
             finalize_upgrade! if upgrading?
@@ -116,7 +116,7 @@ module Koudoku::Subscription
               subscription = create_subscription(customer)
               self.stripe_subscription_id = subscription.id
               self.stripe_status = subscription.status
-              self.stripe_last_payment_status = subscription.latest_invoice.payment_intent.status
+              self.stripe_last_payment_status = subscription.latest_invoice.payment_intent&.status
 
             rescue Stripe::CardError => card_error
               errors[:base] << card_error.message
@@ -336,7 +336,7 @@ module Koudoku::Subscription
     update_column(:last_four, card.last4)
     update_column(:card_type, card.brand)
     update_column(:stripe_status, subscription.status)
-    update_column(:stripe_last_payment_status, subscription.latest_invoice.payment_intent.status)
+    update_column(:stripe_last_payment_status, subscription.latest_invoice.payment_intent&.status)
   end
 
   def fetch_invoices
@@ -353,8 +353,8 @@ module Koudoku::Subscription
     end
   end
 
-  def most_recent_unpaid_invoice
-    invoices.order(:id).select(&:unpaid?).last
+  def most_recent_open_invoice
+    invoices.order(:id).select(&:open?).last
   end
 
   def has_open_invoices?

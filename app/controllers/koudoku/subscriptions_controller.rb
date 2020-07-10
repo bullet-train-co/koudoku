@@ -2,7 +2,7 @@ module Koudoku
   class SubscriptionsController < ApplicationController
     before_action :load_owner
     before_action :show_existing_subscription, only: [:index, :new, :create], unless: :no_owner?
-    before_action :load_subscription, only: [:show, :cancel, :edit, :update, :authenticate, :reattempt]
+    before_action :load_subscription, only: [:show, :cancel, :edit, :update, :authenticate, :reattempt, :failed]
     before_action :load_plans, only: [:index, :edit]
 
     def load_plans
@@ -163,9 +163,9 @@ module Koudoku
         if @subscription.update_attributes(subscription_params)
           @subscription.pay_invoices
           if @subscription.has_open_invoices?
-            unpaid_invoice = @subscription.most_recent_unpaid_invoice
-            if unpaid_invoice.authentication_required?
-              redirect_to authenticate_owner_subscription_path(@owner, @subscription, invoice_id: unpaid_invoice.id)
+            open_invoice = @subscription.most_recent_open_invoice
+            if open_invoice.authentication_required?
+              redirect_to authenticate_owner_subscription_path(@owner, @subscription, invoice_id: open_invoice.id)
             else
               flash[:error] = I18n.t('koudoku.failure.needs_updated_card')
               redirect_to edit_owner_subscription_path(@owner, @subscription, update: 'card')
@@ -200,7 +200,7 @@ module Koudoku
       load_invoice
       begin
         @invoice.stripe_invoice.pay
-        redirect_to redirect_to owner_subscription_path(@owner, @subscription)
+        redirect_to owner_subscription_path(@owner, @subscription)
       rescue Stripe::CardError => error
         @invoice.fetch_from_stripe
         if @invoice.authentication_required?
@@ -209,6 +209,13 @@ module Koudoku
           flash[:error] = I18n.t('koudoku.failure.charge_reattempt_needs_updated_card', :error => error.message)
           redirect_to edit_owner_subscription_path(@owner, @subscription, update: 'card')
         end
+      end
+    end
+
+    def failed
+      load_invoice
+      unless @invoice.authentication_required? || @invoice.open?
+        redirect_to owner_subscription_path(@owner, @subscription)
       end
     end
 
