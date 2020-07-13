@@ -44,7 +44,8 @@ module Koudoku::Subscription
                 expand: ['latest_invoice.payment_intent'],
               })
             else
-              subscription = create_subscription(customer)
+              # we don't give them a trial because they're not a new account.
+              subscription = create_subscription(customer, trial: false)
               self.stripe_subscription_id = subscription.id
             end
 
@@ -113,7 +114,8 @@ module Koudoku::Subscription
 
               finalize_new_customer!(customer.id, plan.price)
 
-              subscription = create_subscription(customer)
+              # `trial: true` only actually creates a trial if koudoku is configured to have a trial period.
+              subscription = create_subscription(customer, trial: true)
               self.stripe_subscription_id = subscription.id
               self.stripe_status = subscription.status
               self.stripe_last_payment_status = subscription.latest_invoice.payment_intent&.status
@@ -286,7 +288,7 @@ module Koudoku::Subscription
   def charge_disputed
   end
 
-  def create_subscription(customer)
+  def create_subscription(customer, trial: false)
     subscription_attributes = {
       customer: customer.id,
       items:[
@@ -295,9 +297,12 @@ module Koudoku::Subscription
           quantity: subscription_owner_quantity,
         }
       ],
-      trial_from_plan: true,
       expand: ['latest_invoice.payment_intent'],
     }
+
+    if trial && Koudoku.free_trial?
+      subscription_attributes[:trial_end] = Koudoku.free_trial_length.days.from_now.to_i
+    end
 
     # If the class we're being included in supports Link Mink ..
     if respond_to? :link_mink_id
