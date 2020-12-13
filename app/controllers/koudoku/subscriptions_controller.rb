@@ -160,7 +160,7 @@ module Koudoku
 
     def update
       begin
-        if @subscription.update_attributes(subscription_params)
+        if @subscription.update(subscription_params)
           @subscription.pay_invoices
           if @subscription.has_open_invoices?
             open_invoice = @subscription.most_recent_open_invoice
