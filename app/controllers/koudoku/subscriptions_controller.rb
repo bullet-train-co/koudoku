@@ -160,7 +160,7 @@ module Koudoku
 
     def update
       begin
-        if @subscription.update_attributes(subscription_params)
+        if @subscription.update(subscription_params)
           flash[:notice] = I18n.t('koudoku.confirmations.subscription_updated')
           redirect_to owner_subscription_path(@owner, @subscription)
         else
